@@ -17,11 +17,11 @@ npm test
 
 ## Validation status
 
-The azimuth conversion from compass bearings to Open-Meteo’s south-zero azimuth convention has been corrected and tested. Automated core tests pass, but end-to-end production API requests have not been verified yet. No Vercel deployment has been created: the connected Vercel account returned no accessible teams. A commercial API license and server-side API proxy are required before monetization.
+The azimuth conversion from compass bearings to Open-Meteo’s south-zero azimuth convention has been corrected and tested. Automated core tests pass, but end-to-end production API requests have not been verified yet. The project deploys through GitHub to Vercel. Approximate IP location is resolved using Vercel geolocation request headers at /api/location. A commercial API license and server-side API proxy are required before monetization.
 
 ## Core features
 
-- Search international cities / postal codes using Open-Meteo geocoding; with optional browser location permission.
+- Automatically detect approximate IP-based location when a visitor first arrives, with manual international city search, share-link override and optional browser GPS.
 - 3-day forecast request; daily totals for today/tomorrow and hourly bar chart.
 - Controls for capacity, tilt and facing; 18% system loss assumption.
 - Shareable query parameters and a configurable `embed.html` iframe widget.
