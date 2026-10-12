@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {solarEstimate,numeric,configFromParams,embedUrl,forecastUrl} from '../solar-core.js';
+test('one-hour irradiance conversion and day aggregation',()=>{const x=solarEstimate({time:['2026-10-12T11:00','2026-10-12T12:00','2026-10-13T11:00'],global_tilted_irradiance:[1000,500,800]},5);assert.equal(x.length,2);assert.ok(Math.abs(x[0].total-6.15)<1e-9);assert.equal(x[0].peakTime,'11:00');assert.ok(Math.abs(x[1].total-3.28)<1e-9);});
+test('negative/invalid radiation never creates negative generation',()=>{const x=solarEstimate({time:['2026-10-12T07:00','2026-10-12T08:00'],global_tilted_irradiance:[-10,null]},5);assert.equal(x[0].total,0);});
+test('URL parameter bounds protect from unreasonable values',()=>{const c=configFromParams(new URLSearchParams('lat=120&lon=-900&kwp=999999&tilt=100&azimuth=-4'));assert.equal(c.lat,90);assert.equal(c.lon,-180);assert.equal(c.kwp,1000);assert.equal(c.tilt,90);assert.equal(c.azimuth,0);});
+test('query parameters preserve share links',()=>{const x=embedUrl('https://solar.example/index.html',{lat:55,lon:12,kwp:5,tilt:35,azimuth:180,label:'Malmö, Sverige'});const url=new URL(x);assert.equal(url.pathname,'/embed.html');assert.equal(url.searchParams.get('label'),'Malmö, Sverige');});
+test('forecast URL asks for tilted irradiation and location timezone',()=>{const url=new URL(forecastUrl({lat:55.6,lon:12.6,tilt:35,azimuth:180}));assert.equal(url.searchParams.get('hourly').split(',')[0],'global_tilted_irradiance');assert.equal(url.searchParams.get('timezone'),'auto');assert.equal(url.searchParams.get('azimuth'),'0');});
+test('missing arrays reject with useful error',()=>assert.throws(()=>solarEstimate({time:[]},5),/Incomplete/));
+test('compass bearings convert to Open-Meteo azimuth convention',()=>{for(const [bearing,expected] of [[0,-180],[90,-90],[135,-45],[180,0],[225,45],[270,90]]){const u=new URL(forecastUrl({lat:55.6,lon:12.6,tilt:35,azimuth:bearing}));assert.equal(Number(u.searchParams.get('azimuth')),expected);}});
