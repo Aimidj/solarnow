@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
- android:minWidth="250dp" android:minHeight="130dp" android:targetCellWidth="4" android:targetCellHeight="2"
- android:initialLayout="@layout/waqt_widget" android:resizeMode="horizontal|vertical"
+ android:minWidth="130dp" android:minHeight="130dp" android:targetCellWidth="2" android:targetCellHeight="2"
+ android:initialLayout="@layout/waqt_widget_compact" android:resizeMode="horizontal|vertical"
  android:updatePeriodMillis="1800000" android:widgetCategory="home_screen"/>

@@ -208,18 +208,21 @@ public final class MainActivity extends Activity {
    for(int id:ids)render(c,manager,id);
    schedule(c,false);
   }
+  @Override public void onAppWidgetOptionsChanged(Context c,AppWidgetManager manager,int widgetId,Bundle newOptions){APP=c.getApplicationContext();render(c,manager,widgetId);}
   @Override public void onReceive(Context c,Intent i){
    super.onReceive(c,i);
    if(i!=null&&(FLIP.equals(i.getAction())||Intent.ACTION_BOOT_COMPLETED.equals(i.getAction())||Intent.ACTION_TIMEZONE_CHANGED.equals(i.getAction())||Intent.ACTION_DATE_CHANGED.equals(i.getAction())))refreshWidgets(c);
   }
   void render(Context c,AppWidgetManager manager,int id){
-   RemoteViews rv=new RemoteViews(c.getPackageName(),R.layout.waqt_widget);
+   int minWidth=manager.getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0);
+   boolean compact=minWidth<240;
+   RemoteViews rv=new RemoteViews(c.getPackageName(),compact?R.layout.waqt_widget_compact:R.layout.waqt_widget);
    Intent open=new Intent(c,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP);
    rv.setOnClickPendingIntent(R.id.widget_root,PendingIntent.getActivity(c,10,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE));
    rv.setTextViewText(R.id.w_location,prefs(c).getString("city","Tryk her · tillad GPS"));
    rv.setTextViewText(R.id.w_date,new SimpleDateFormat("d. MMM",new Locale("da","DK")).format(new Date()));
    JSONObject today=find(day(System.currentTimeMillis()));
-   for(int j=0;j<5;j++)rv.setTextViewText(IDs[j],N[j]+"\n"+clock(event(today,K[j])));
+   if(!compact)for(int j=0;j<5;j++)rv.setTextViewText(IDs[j],N[j]+"\n"+clock(event(today,K[j])));
    long[] ms=new long[1];int idx=next(ms);
    if(idx<0){rv.setTextViewText(R.id.w_next,"Åbn Waqt");rv.setTextViewText(R.id.w_at,"GPS og bønnetider");rv.setViewVisibility(R.id.w_countdown,View.GONE);}
    else {
