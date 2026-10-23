@@ -56,11 +56,57 @@ public final class MainActivity extends Activity {
  static String day(long t) { SimpleDateFormat f=new SimpleDateFormat("yyyy-MM-dd",Locale.US); f.setTimeZone(TimeZone.getDefault());return f.format(new Date(t));}
  static String tomorrow(){Calendar c=Calendar.getInstance();c.add(Calendar.DATE,1);return day(c.getTimeInMillis());}
  static JSONObject find(String d){
-   try {JSONArray a=new JSONObject(prefs(APP).getString("json","{}")).getJSONArray("list");
-   for(int i=0;i<a.length();i++){JSONObject x=a.optJSONObject(i);if(x!=null&&d.equals(x.optString("d")))return x;}}
-   catch(Exception ignored){} return null;
+   if(APP==null)return null;
+   try {
+    SharedPreferences p=prefs(APP);String raw=p.getString("json","{}");
+    if(!raw.equals(netJson)||netArray==null){netArray=new JSONObject(raw).optJSONArray("list");netJson=raw;}
+    JSONArray a=netArray;
+    if(a!=null)for(int i=0;i<a.length();i++){
+     JSONObject x=a.optJSONObject(i);
+     if(x!=null&&d.equals(x.optString("d")))return x;
+    }
+   }catch(Exception ignored){}
+   if(!nearCopenhagen())return null;
+   JSONObject cached=backup();
+   return cached==null?null:cached.optJSONObject(d);
  }
  static Context APP;
+ static volatile JSONObject backupJson;
+ static volatile String netJson;
+ static volatile JSONArray netArray;
+ static boolean nearCopenhagen(){
+  if(APP==null)return false;
+  SharedPreferences p=prefs(APP);
+  if(!p.contains("lat")||!p.contains("lon"))return false;
+  double lat=Double.longBitsToDouble(p.getLong("lat",0));
+  double lon=Double.longBitsToDouble(p.getLong("lon",0));
+  return Math.abs(lat-55.665)<0.25&&Math.abs(lon-12.381)<0.45;
+ }
+ static boolean isBackupDay(String d){
+  if(!nearCopenhagen())return false;
+  try {JSONObject json=backup();
+   return json!=null && json.has(d);}catch(Exception ignored){return false;}
+ }
+ static JSONObject backup(){
+  if(backupJson!=null)return backupJson;
+  synchronized(MainActivity.class){
+   if(backupJson!=null)return backupJson;
+   if(APP==null)return null;
+   try(InputStream stream=APP.getAssets().open("muwaqqit_copenhagen_backup.json");
+       BufferedReader reader=new BufferedReader(new InputStreamReader(stream,StandardCharsets.UTF_8))){
+    StringBuilder s=new StringBuilder();String ln;
+    while((ln=reader.readLine())!=null)s.append(ln);
+    JSONArray days=new JSONObject(s.toString()).getJSONArray("list");
+    JSONObject byDay=new JSONObject();
+    for(int i=0;i<days.length();i++){JSONObject item=days.getJSONObject(i);byDay.put(item.getString("d"),item);}
+    backupJson=byDay;return byDay;
+   }catch(Exception e){android.util.Log.e("Waqt","Backup data unavailable",e);return null;}
+  }
+ }
+ static boolean failure(SharedPreferences p,String reason){
+  p.edit().putString("sync_error",reason).apply();android.util.Log.w("Waqt","Sync error: "+reason);return false;
+ }
+
  static long event(JSONObject x,String key) {
    if(x==null)return -1;
    String h=x.optString(key+"_time",""),z=x.optString(key+"_tz",x.optString("dtz",""));
@@ -88,25 +134,25 @@ public final class MainActivity extends Activity {
    JSONObject all=new JSONObject();for(String date:new String[]{day(System.currentTimeMillis()),tomorrow()}) {
     if(all.has(date))continue;
     String url=String.format(Locale.US,"https://www.muwaqqit.com/api.json?d=%s;lt=%.6f&ln=%.6f;fa=-19;era=-12&ea=-16&tztype=auto&tz=%s",date,lat,lon,java.net.URLEncoder.encode(TimeZone.getDefault().getID(),"UTF-8"));
-    HttpURLConnection h=(HttpURLConnection)new URL(url).openConnection();h.setConnectTimeout(12000);h.setReadTimeout(12000);h.setRequestProperty("Accept","application/json");
-    try {if(h.getResponseCode()!=200)return false;
+    HttpURLConnection h=(HttpURLConnection)new URL(url).openConnection();h.setConnectTimeout(12000);h.setReadTimeout(12000);h.setRequestProperty("Accept","application/json");h.setRequestProperty("User-Agent","Waqt-Android/1.1");
+    try {int response=h.getResponseCode();if(response!=200)return failure(p,"Muwaqqit HTTP "+response);
      StringBuilder sb=new StringBuilder();try(InputStream stream=h.getInputStream();BufferedReader r=new BufferedReader(new InputStreamReader(stream,StandardCharsets.UTF_8))){
-       String s;while((s=r.readLine())!=null){sb.append(s);if(sb.length()>1500000)return false;}
+       String s;while((s=r.readLine())!=null){sb.append(s);if(sb.length()>1500000)return failure(p,"For stort API-svar");}
      }
      JSONArray list=new JSONObject(sb.toString()).getJSONArray("list");
      for(int i=0;i<list.length();i++){JSONObject x=list.optJSONObject(i);if(x!=null&&x.optString("d").matches("\\d{4}-\\d{2}-\\d{2}"))all.put(x.getString("d"),x);}
     }finally{h.disconnect();}
    }
-   if(!all.has(day(System.currentTimeMillis()))||!all.has(tomorrow()))return false;
-   if(Double.longBitsToDouble(p.getLong("lat",0))!=lat||Double.longBitsToDouble(p.getLong("lon",0))!=lon)return false;
+   if(!all.has(day(System.currentTimeMillis()))||!all.has(tomorrow()))return failure(p,"Dato mangler i Muwaqqit-svar");
+   if(Double.longBitsToDouble(p.getLong("lat",0))!=lat||Double.longBitsToDouble(p.getLong("lon",0))!=lon)return failure(p,"GPS ændret under hentning");
    JSONArray a=new JSONArray();java.util.Iterator<String> it=all.keys();while(it.hasNext())a.put(all.getJSONObject(it.next()));
-   p.edit().putString("json",new JSONObject().put("list",a).toString()).putLong("fetched",System.currentTimeMillis()).apply();
+   p.edit().putString("json",new JSONObject().put("list",a).toString()).putLong("fetched",System.currentTimeMillis()).remove("sync_error").apply();
    refreshWidgets(c);return true;
-  }catch(Exception ex){return false;}
+  }catch(Exception ex){return failure(p,ex.getClass().getSimpleName()+": "+String.valueOf(ex.getMessage()).replace("\n"," ").substring(0,Math.min(115,String.valueOf(ex.getMessage()).length())));}
  }
  Handler handler=new Handler(Looper.getMainLooper());TextView city,dayLabel,nextName,timer,at,status;
  TextView[] times=new TextView[5];LocationManager gps;LocationListener listener;boolean destroyed=false;
- @Override public void onCreate(Bundle b){super.onCreate(b);APP=getApplicationContext();build();redraw();requestGps();handler.post(ticker);}
+ @Override public void onCreate(Bundle b){super.onCreate(b);APP=getApplicationContext();build();redraw();if(prefs(this).contains("lat"))load();requestGps();handler.post(ticker);}
  @Override protected void onResume(){super.onResume();if(city!=null)redraw();}
  @Override protected void onDestroy(){destroyed=true;handler.removeCallbacks(ticker);try{if(listener!=null)gps.removeUpdates(listener);}catch(Exception ignored){}super.onDestroy();}
  TextView tx(String text,int sz,int color){TextView v=new TextView(this);v.setText(text);v.setTextColor(color);v.setTextSize(sz);v.setIncludeFontPadding(false);return v;}
@@ -132,7 +178,7 @@ public final class MainActivity extends Activity {
   }
   status=tx("Lokation og tider opdateres automatisk",12,MUTED);p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=px(24);body.addView(status,p);
   TextView info=tx("Hanafi ʿAsr · Fajr −19° · ʿIshāʾ −16°",11,MUTED);p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=px(7);body.addView(info,p);
-  Button update=new Button(this);update.setAllCaps(false);update.setText("⌖  Opdater GPS og tider");update.setOnClickListener(v->requestGps());
+  Button update=new Button(this);update.setAllCaps(false);update.setText("⌖  Opdater GPS og tider");update.setOnClickListener(v->{requestGps();if(prefs(this).contains("lat"))load();});
   p=new LinearLayout.LayoutParams(-1,px(52));p.topMargin=px(18);body.addView(update,p);
  }
  void redraw(){
@@ -142,45 +188,63 @@ public final class MainActivity extends Activity {
   JSONObject obj=find(day(System.currentTimeMillis()));
   for(int i=0;i<5;i++)times[i].setText(clock(event(obj,K[i])));
   long[] ms=new long[1];int idx=next(ms);
-  if(idx<0){nextName.setText("—");timer.setText("--:--:--");at.setText("Åbn appen med internet for tider");return;}
+  if(idx<0){nextName.setText("—");timer.setText("--:--:--");at.setText("Ingen tider · kontrollér internet og GPS");return;}
   nextName.setText(N[idx]);long remaining=Math.max(0,(ms[0]-System.currentTimeMillis()+999)/1000);
   timer.setText(String.format(Locale.US,"%02d:%02d:%02d",remaining/3600,remaining/60%60,remaining%60));
   at.setText("Kl. "+clock(ms[0]));
  }
  Runnable ticker=new Runnable(){public void run(){if(destroyed)return;redraw();handler.postDelayed(this,1000);}};
  void requestGps(){
-  if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){
-   requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION},12);return;
-  }
+  boolean fine=checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+  boolean coarse=checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+  if(!fine&&!coarse){requestPermissions(new String[]{Manifest.permission.ACCESS_COARSE_LOCATION,Manifest.permission.ACCESS_FINE_LOCATION},12);return;}
   gps=(LocationManager)getSystemService(LOCATION_SERVICE);
   if(gps==null){status.setText("GPS ikke tilgængelig");return;}
   try {
-    Location last=null;for(String provider:new String[]{LocationManager.NETWORK_PROVIDER,LocationManager.GPS_PROVIDER}) {
-     if(!gps.isProviderEnabled(provider))continue;Location p=gps.getLastKnownLocation(provider);
-     if(p!=null&&(last==null||p.getTime()>last.getTime()))last=p;
-    }
-    if(last!=null&&System.currentTimeMillis()-last.getTime()<4*3600000L)accept(last);
-    String provider=gps.isProviderEnabled(LocationManager.NETWORK_PROVIDER)?LocationManager.NETWORK_PROVIDER:
-      (gps.isProviderEnabled(LocationManager.GPS_PROVIDER)?LocationManager.GPS_PROVIDER:null);
-    if(provider==null){status.setText("Slå lokation til i Android");return;}
-    listener=new LocationListener(){@Override public void onLocationChanged(Location l){accept(l);try{gps.removeUpdates(this);}catch(Exception ignored){}}};
-    gps.requestLocationUpdates(provider,0,0,listener,Looper.getMainLooper());
-    LocationListener toCancel=listener;handler.postDelayed(()->{try{gps.removeUpdates(toCancel);}catch(Exception ignored){}},14000);
-    if(last==null)status.setText("Finder din GPS-position…");
-  }catch(SecurityException e){status.setText("Lokationstilladelse mangler");}
+   Location last=null;
+   for(String provider:(fine?new String[]{LocationManager.NETWORK_PROVIDER,LocationManager.GPS_PROVIDER}:new String[]{LocationManager.NETWORK_PROVIDER})){
+    try {
+     if(!gps.isProviderEnabled(provider))continue;
+     Location loc=gps.getLastKnownLocation(provider);
+     if(loc!=null&&(last==null||loc.getTime()>last.getTime()))last=loc;
+    }catch(SecurityException ignored){}
+   }
+   if(last!=null&&System.currentTimeMillis()-last.getTime()<4*3600000L)accept(last);
+   String provider=gps.isProviderEnabled(LocationManager.NETWORK_PROVIDER)?LocationManager.NETWORK_PROVIDER:
+      (fine&&gps.isProviderEnabled(LocationManager.GPS_PROVIDER)?LocationManager.GPS_PROVIDER:null);
+   if(provider==null){
+     if(!prefs(this).contains("lat"))status.setText("Aktivér Android-lokation og åbn appen igen");
+     return;
+   }
+   listener=new LocationListener(){@Override public void onLocationChanged(Location l){accept(l);try{gps.removeUpdates(this);}catch(Exception ignored){}}};
+   gps.requestLocationUpdates(provider,0,0,listener,Looper.getMainLooper());
+   LocationListener toCancel=listener;
+   handler.postDelayed(()->{try{gps.removeUpdates(toCancel);}catch(Exception ignored){}},14000);
+   if(last==null&&!prefs(this).contains("lat"))status.setText("Finder din GPS-position…");
+  }catch(SecurityException e){
+   if(!prefs(this).contains("lat"))status.setText("Giv lokationstilladelse i Android");
+  }
  }
  void accept(Location l){
    if(l==null)return;double lat=l.getLatitude(),lon=l.getLongitude();if(Math.abs(lat)>90||Math.abs(lon)>180)return;
    SharedPreferences p=prefs(this);
    boolean change=!p.contains("lat")||Math.abs(Double.longBitsToDouble(p.getLong("lat",0))-lat)>0.01||Math.abs(Double.longBitsToDouble(p.getLong("lon",0))-lon)>0.01;
-   p.edit().putLong("lat",Double.doubleToLongBits(lat)).putLong("lon",Double.doubleToLongBits(lon))
-     .putString("city",String.format(Locale.US,"GPS · %.3f°, %.3f°",lat,lon)).apply();
+   SharedPreferences.Editor edit=p.edit().putLong("lat",Double.doubleToLongBits(lat)).putLong("lon",Double.doubleToLongBits(lon))
+     .putString("city",String.format(Locale.US,"GPS · %.3f°, %.3f°",lat,lon));
+   if(change)edit.remove("json");
+   edit.apply();
    redraw();refreshWidgets(this);schedule(this,true);
    if(change||find(day(System.currentTimeMillis()))==null||System.currentTimeMillis()-p.getLong("fetched",0)>8*3600000L)load();
  }
- void load(){status.setText("Henter Muwaqqit…");new Thread(()->{
+ void load(){status.setText("Synkroniserer Muwaqqit…");new Thread(()->{
    boolean ok=fetch(getApplicationContext());
-   runOnUiThread(()->{if(destroyed)return;status.setText(ok?"✓ Muwaqqit · tider opdateret":"Kunne ikke hente tider · prøv igen");redraw();});
+   runOnUiThread(()->{if(destroyed)return;
+    redraw();refreshWidgets(this);
+    if(ok)status.setText("✓ Muwaqqit · GPS-tider synkroniseret");
+    else if(isBackupDay(day(System.currentTimeMillis())))
+      status.setText("Offline-reserve: Muwaqqit, Københavnsområdet (ca.). Online: "+prefs(this).getString("sync_error","ikke tilgængelig"));
+    else status.setText("Kunne ikke hente Muwaqqit: "+prefs(this).getString("sync_error","prøv igen"));
+   });
   },"waqt-fetch").start();}
  @Override public void onRequestPermissionsResult(int code,String[] perms,int[] grants){super.onRequestPermissionsResult(code,perms,grants);if(code==12){boolean granted=false; for(int value: grants)if(value==PackageManager.PERMISSION_GRANTED)granted=true; if(granted)requestGps();else status.setText("Lokation blev ikke tilladt · tillad den i Android-indstillinger");}}
  static void schedule(Context c,boolean urgent){
