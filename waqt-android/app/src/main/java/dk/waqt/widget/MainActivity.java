@@ -182,7 +182,7 @@ public final class MainActivity extends Activity {
    boolean ok=fetch(getApplicationContext());
    runOnUiThread(()->{if(destroyed)return;status.setText(ok?"✓ Muwaqqit · tider opdateret":"Kunne ikke hente tider · prøv igen");redraw();});
   },"waqt-fetch").start();}
- @Override public void onRequestPermissionsResult(int code,String[] perms,int[] grants){super.onRequestPermissionsResult(code,perms,grants);if(code==12)requestGps();}
+ @Override public void onRequestPermissionsResult(int code,String[] perms,int[] grants){super.onRequestPermissionsResult(code,perms,grants);if(code==12){boolean granted=false; for(int value: grants)if(value==PackageManager.PERMISSION_GRANTED)granted=true; if(granted)requestGps();else status.setText("Lokation blev ikke tilladt · tillad den i Android-indstillinger");}}
  static void schedule(Context c,boolean urgent){
   JobScheduler js=(JobScheduler)c.getSystemService(Context.JOB_SCHEDULER_SERVICE);if(js==null||!prefs(c).contains("lat"))return;
   if(js.getPendingJob(7012)!=null)return;
